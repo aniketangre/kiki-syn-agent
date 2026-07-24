@@ -309,20 +309,16 @@ def _describe_tool(name: str, args: dict) -> str:
 if st.session_state.pending_interrupt is not None:
     tool_info = st.session_state.pending_interrupt
 
-    # Short plain-English description shown as an assistant bubble
+    # Plain-English description as an assistant bubble
     _render_assistant(_describe_tool(tool_info["name"], tool_info["args"]))
 
-    with st.container(border=True):
-        st.markdown("#### Confirm Tool Execution")
-        st.markdown(f"**Tool:** `{tool_info['name']}`")
-        import json as _json
-        st.code(_json.dumps(tool_info["args"], indent=2), language="json")
-        st.caption("Review the parameters above, then confirm or cancel.")
+    # Minimal yes / no prompt — no JSON, no repeated parameters
+    with st.chat_message("assistant", avatar="🧊"):
+        st.markdown("Shall I proceed?")
+        col_yes, col_no, col_pad = st.columns([1, 1, 4])
 
-        col_confirm, col_cancel = st.columns(2)
-
-        with col_confirm:
-            if st.button("Confirm — Run Tool", type="primary",
+        with col_yes:
+            if st.button("✓ Yes", type="primary",
                          use_container_width=True, key="hitl_confirm"):
                 st.session_state.pending_interrupt = None
 
@@ -354,8 +350,8 @@ if st.session_state.pending_interrupt is not None:
 
                 st.rerun()
 
-        with col_cancel:
-            if st.button("Cancel — Skip Tool", type="secondary",
+        with col_no:
+            if st.button("✗ No", type="secondary",
                          use_container_width=True, key="hitl_cancel"):
                 st.session_state.pending_interrupt = None
                 cancel_text, _, _ = cancel(st.session_state.thread_id)
