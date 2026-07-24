@@ -12,10 +12,12 @@ from pathlib import Path
 import streamlit as st
 
 from agent import (
+    cancel,
     chat,
     delete_conversation,
     list_conversations,
     load_messages,
+    resume,
     save_conversation,
     save_message_image,
 )
@@ -105,12 +107,14 @@ button[aria-label="Open sidebar"] {
 # Session state
 # ---------------------------------------------------------------------------
 
-if "thread_id"      not in st.session_state:
-    st.session_state.thread_id      = str(uuid.uuid4())
-if "messages"       not in st.session_state:
-    st.session_state.messages       = []
-if "pending_prompt" not in st.session_state:
-    st.session_state.pending_prompt = None
+if "thread_id"         not in st.session_state:
+    st.session_state.thread_id         = str(uuid.uuid4())
+if "messages"          not in st.session_state:
+    st.session_state.messages          = []
+if "pending_prompt"    not in st.session_state:
+    st.session_state.pending_prompt    = None
+if "pending_interrupt" not in st.session_state:
+    st.session_state.pending_interrupt = None  # None or {"name": str, "args": dict}
 
 # ---------------------------------------------------------------------------
 # Sidebar
@@ -125,9 +129,10 @@ with st.sidebar:
 
     # ── New conversation ──────────────────────────────────────────────────────
     if st.button("＋  New Conversation", use_container_width=True, type="primary"):
-        st.session_state.thread_id      = str(uuid.uuid4())
-        st.session_state.messages       = []
-        st.session_state.pending_prompt = None
+        st.session_state.thread_id         = str(uuid.uuid4())
+        st.session_state.messages          = []
+        st.session_state.pending_prompt    = None
+        st.session_state.pending_interrupt = None
         st.rerun()
 
     st.divider()
@@ -168,9 +173,10 @@ with st.sidebar:
                     btn_label = f"{title}  —  {label}"
                     if st.button(btn_label, key=f"conv_{conv['thread_id']}",
                                  use_container_width=True):
-                        st.session_state.thread_id      = conv["thread_id"]
-                        st.session_state.messages       = load_messages(conv["thread_id"])
-                        st.session_state.pending_prompt = None
+                        st.session_state.thread_id         = conv["thread_id"]
+                        st.session_state.messages          = load_messages(conv["thread_id"])
+                        st.session_state.pending_prompt    = None
+                        st.session_state.pending_interrupt = None
                         st.rerun()
                 with col_del:
                     if st.button("🗑", key=f"del_{conv['thread_id']}",
@@ -268,17 +274,81 @@ for msg in st.session_state.messages:
         _render_assistant(msg["content"], msg.get("image"))
 
 # ---------------------------------------------------------------------------
+# HITL interrupt UI — shown whenever the graph is paused before a tool call
+# ---------------------------------------------------------------------------
+
+if st.session_state.pending_interrupt is not None:
+    tool_info = st.session_state.pending_interrupt
+
+    with st.container(border=True):
+        st.markdown("#### Confirm Tool Execution")
+        st.markdown(f"**Tool:** `{tool_info['name']}`")
+        import json as _json
+        st.code(_json.dumps(tool_info["args"], indent=2), language="json")
+        st.caption("Review the parameters above, then confirm or cancel.")
+
+        col_confirm, col_cancel = st.columns(2)
+
+        with col_confirm:
+            if st.button("Confirm — Run Tool", type="primary",
+                         use_container_width=True, key="hitl_confirm"):
+                st.session_state.pending_interrupt = None
+
+                thinking_slot_h = st.empty()
+                with thinking_slot_h.container():
+                    with st.chat_message("assistant", avatar="🧊"):
+                        st.markdown(THINKING_HTML, unsafe_allow_html=True)
+
+                reply_r, png_paths_r, next_interrupt = resume(st.session_state.thread_id)
+                st.session_state.pending_interrupt = next_interrupt
+
+                new_image_r = None
+                for raw_path in png_paths_r:
+                    raw = Path(raw_path)
+                    if raw.exists():
+                        ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        dest = _IMAGES_DIR / f"{raw.stem}_{ts}.png"
+                        shutil.copy2(raw, dest)
+                        save_message_image(st.session_state.thread_id, str(dest))
+                        new_image_r = dest
+                        break
+
+                thinking_slot_h.empty()
+                if reply_r:
+                    _render_assistant(reply_r, new_image_r)
+                    st.session_state.messages.append({
+                        "role": "assistant", "content": reply_r, "image": new_image_r,
+                    })
+
+                st.rerun()
+
+        with col_cancel:
+            if st.button("Cancel — Skip Tool", type="secondary",
+                         use_container_width=True, key="hitl_cancel"):
+                st.session_state.pending_interrupt = None
+                cancel_text, _, _ = cancel(st.session_state.thread_id)
+                _render_assistant(cancel_text)
+                st.session_state.messages.append({
+                    "role": "assistant", "content": cancel_text, "image": None,
+                })
+                st.rerun()
+
+# ---------------------------------------------------------------------------
 # Input + agent call
 # ---------------------------------------------------------------------------
 
 pending    = st.session_state.pending_prompt
-user_input = st.chat_input("Message Synera AI…")
+user_input = st.chat_input(
+    "Message Synera AI…",
+    disabled=st.session_state.pending_interrupt is not None,
+)
 
 to_process = pending or user_input
 if pending:
     st.session_state.pending_prompt = None
 
-if to_process:
+# Do not process new input while a tool confirmation is pending
+if to_process and st.session_state.pending_interrupt is None:
     # Save conversation title on first message
     if not st.session_state.messages:
         save_conversation(st.session_state.thread_id, to_process)
@@ -293,8 +363,9 @@ if to_process:
         with st.chat_message("assistant", avatar="🧊"):
             st.markdown(THINKING_HTML, unsafe_allow_html=True)
 
-    # Run agent — returns reply text and any PNG paths from tool exports
-    reply, png_paths = chat(st.session_state.thread_id, to_process)
+    # Run agent — returns reply text, PNG paths, and optional pending tool
+    reply, png_paths, pending_tool = chat(st.session_state.thread_id, to_process)
+    st.session_state.pending_interrupt = pending_tool
 
     new_image = None
     for raw_path in png_paths:
@@ -307,14 +378,13 @@ if to_process:
             new_image = dest
             break
 
-    # Show reply
+    # Show reply (may be empty if the graph paused immediately at the interrupt)
     thinking_slot.empty()
-    _render_assistant(reply, new_image)
+    if reply:
+        _render_assistant(reply, new_image)
+        st.session_state.messages.append({
+            "role": "assistant", "content": reply, "image": new_image,
+        })
 
-    # Persist to session state
-    st.session_state.messages.append({
-        "role": "assistant", "content": reply, "image": new_image,
-    })
-
-    if pending:
+    if pending or pending_tool:
         st.rerun()
