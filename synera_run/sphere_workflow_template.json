@@ -1,0 +1,26 @@
+[
+  {
+    "id": "1edd8e43-b6dc-4212-bdbc-8eaeea508fe7",
+    "name": "center",
+    "typeName": "Point 3D",
+    "value": {
+      "stringValue": {
+        "0": [
+          "Point(X = 5, Y = 5, Z = 5)"
+        ]
+      }
+    }
+  },
+  {
+    "id": "a5f7b2ce-c038-4524-92da-d3dd4ec44f0e",
+    "name": "radius",
+    "typeName": "Floating point number",
+    "value": {
+      "stringValue": {
+        "0": [
+          "5.0"
+        ]
+      }
+    }
+  }
+]

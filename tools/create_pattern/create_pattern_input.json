@@ -1,0 +1,62 @@
+[
+  {
+    "id": "80268b7a-a619-4b8b-91b7-aae6d029ae84",
+    "name": "u-size",
+    "typeName": "Floating point number",
+    "value": {
+      "stringValue": {
+        "0": [
+          "1.0"
+        ]
+      }
+    }
+  },
+  {
+    "id": "4daa3e30-aa5f-4575-a647-a259ee4db7cc",
+    "name": "v-size",
+    "typeName": "Floating point number",
+    "value": {
+      "stringValue": {
+        "0": [
+          "1.0"
+        ]
+      }
+    }
+  },
+  {
+    "id": "d2089e50-bb7c-40ff-83ae-3cb853d5289e",
+    "name": "u-spacing",
+    "typeName": "Floating point number",
+    "value": {
+      "stringValue": {
+        "0": [
+          "0.5"
+        ]
+      }
+    }
+  },
+  {
+    "id": "f45496d1-35ed-4ea9-8128-36c75bd0f881",
+    "name": "v-spacing",
+    "typeName": "Floating point number",
+    "value": {
+      "stringValue": {
+        "0": [
+          "0.5"
+        ]
+      }
+    }
+  },
+  {
+    "id": "38736ffd-e083-43fe-ad39-243ebe1d5539",
+    "name": "pattern-type",
+    "typeName": "Integer number",
+    "value": {
+      "stringValue": {
+        "0": [
+          "1"
+        ]
+      }
+    }
+  }
+]

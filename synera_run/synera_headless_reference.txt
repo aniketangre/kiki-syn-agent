@@ -1,0 +1,237 @@
+SYNERA HEADLESS — DEVELOPER REFERENCE
+Source: https://portal.synera.io/dev-docs/26.03/Synera-Headless
+Captured: 2026-05-08
+================================================================================
+
+OVERVIEW
+--------
+syneraheadless.exe is a console application for running Synera workflows without
+the GUI. Exit code 0 = success, 1 = at least one error occurred.
+
+Optional .NET library: SyneraHeadlessModel.dll (.NET Standard 2.0, no extra deps)
+  - Deserialize output to: Synera.Headless.Model.ExecuteResult
+                           Synera.Headless.Model.InfoResult
+
+
+================================================================================
+COMMANDS
+================================================================================
+1. info
+-------
+Shows inputs/outputs of a .syn file.
+
+  syneraheadless.exe info --file file.syn --output output.json
+
+With template generation (see --template section):
+  syneraheadless.exe info --file file.syn --template template.json
+
+
+2. execute
+----------
+Executes a workflow, injecting inputs via command line or JSON file.
+
+  syneraheadless.exe execute --file file.syn --input 5 import.stl export.step --output output.json
+  syneraheadless.exe execute --file file.syn --jsoninput input.json --output output.json
+
+
+3. upgrade
+----------
+Upgrades .els or .syn files to the most recent format.
+
+  syneraheadless.exe upgrade --file file.syn
+  syneraheadless.exe upgrade --file file.els          # creates file.syn
+  syneraheadless.exe upgrade --directory "C:\Synera Documents"
+  syneraheadless.exe upgrade --directory "C:\Synera Documents" --searchpattern *FEM*
+
+
+4. removeTestNodes
+------------------
+Removes test nodes from workflows.
+
+  syneraheadless.exe removeTestNodes --file file.syn
+  syneraheadless.exe removeTestNodes --files file1.syn file2.syn
+  syneraheadless.exe removeTestNodes --directory "C:\Synera Documents"
+  syneraheadless.exe removeTestNodes --directory "C:\Synera Documents" --searchpattern *example*
+  syneraheadless.exe removeTestNodes --interactive
+
+
+================================================================================
+OPTIONS (for execute)
+================================================================================
+
+--output <file>
+  Writes execution result JSON to the specified file.
+
+--input <v1> [v2 ...]
+  Positional inputs in workflow-defined order.
+  - Order matters
+  - Use "" to skip an optional input
+  - Completely skip trailing optional inputs by omitting them
+  - Supports auto-import: pass a file path and Synera imports it automatically
+    (type of input must be compatible, e.g. Body -> .stp, Mesh -> .stl)
+
+  Examples (workflow has: X:Number, Flag:Bool[optional], File:String[default=output.stl], Center:Point):
+    All inputs:             --input 3 true "My Folder\\My File.stl" 10,0,5
+    Skip optional(s):       --input 3 "" "" 0,0,0
+    Skip all optionals:     --input 3 1,0,0
+    Auto-import geometry:   --input 5 "my body.stp" "my mesh.stl"
+
+--jsoninput <file>
+  Load inputs from a JSON file. Preferred for complex types, lists, trees, or
+  values with special characters.
+
+  JSON input structure:
+  [
+    {
+      "id": "<GUID>",           // specify id OR name (id takes precedence)
+      "name": "Radius",         // optional if id is set
+      "typeName": "Floating point number",  // optional, for convenience only
+      "value": {
+        "stringValue": {
+          "0": ["5.0"]          // "0" is the tree path; list = multiple values at same path
+        }
+      }
+    }
+  ]
+
+  Single value:     "0": ["5.0"]
+  List (3 items):   "0": ["Hello World", "True", "25"]
+  Tree (branches):  "0": ["v1","v2"], "1": ["v3"], "1,1,0": ["v4"]
+
+  Optional inputs with defaults: omit the "value" field entirely.
+
+--template <file>  (used with: info)
+  Generates a ready-to-edit JSON template for --jsoninput.
+  Command: syneraheadless.exe info --file file.syn --template template.json
+  Template includes id, name, typeName, and a "<Enter value here>" placeholder.
+  Optional/default inputs appear without a value field — add manually if needed.
+
+--exportformat <ext1> [ext2 ...]
+  Export each output as a file. One extension per output, "" = skip that output.
+  Extension must match the output type (Mesh -> .stl, Body -> .x_t / .step, etc.)
+
+  Example: --exportformat .stl "" .x_t
+    Output 1 -> .stl, Output 2 -> not exported, Output 3 -> .x_t
+
+--exportdirectory <dir>
+  Directory for exported files. Default: {workflow file location}/Results
+
+--exportnaming <scheme>
+  Name  (default) — file names match output names (collision risk if names not unique)
+  Guid            — file names match output GUIDs
+
+--canvasscreenshot <file>
+  Save a PNG screenshot of the canvas after execution.
+  syneraheadless.exe execute --file file.syn --input 5 10 --canvasscreenshot canvas.png
+
+--canvasscreenshotquality <n>
+  Scale factor for screenshot. Default: 1. Value 4 = 400% zoom / 4x resolution.
+  Quality is auto-reduced if memory is insufficient.
+  syneraheadless.exe execute --file file.syn --input 5 10 --canvasscreenshot canvas.png --canvasscreenshotquality 2
+
+--allownulls
+  By default: execution fails (exit code 1) if any input or output is null/empty tree.
+  With --allownulls: execution continues regardless; exits with code 0.
+  Use when: optional inputs intentionally left null, or tolerating upstream errors.
+
+
+================================================================================
+OUTPUT JSON STRUCTURE (ExecuteResult)
+================================================================================
+
+{
+  "documentId": "<GUID>",
+  "success": true,
+  "canceled": false,
+  "solutionTime": "00:00:00.0166763",
+  "errors": [],
+  "nodeErrors": [],
+  "inputs": [
+    {
+      "id": "<GUID>",
+      "name": "Radius",
+      "type": "<full .NET type string>",
+      "typeName": "Floating point number",
+      "defaultValue": { ... },
+      "value": {
+        "stringValue": { "0": ["5"] },
+        "value": { "0": [{ "$type": "...", "Value": 5.0 }] }
+      }
+    }
+  ],
+  "outputs": [
+    {
+      "id": "<GUID>",
+      "name": "sphere",
+      "type": "<full .NET type string>",
+      "typeName": "General graph data",
+      "value": {
+        "stringValue": { "0": ["Solid Body"] },
+        "value": { "0": [{ "$type": "...", "PkPart": { ... } }] }
+      }
+    }
+  ]
+}
+
+
+================================================================================
+OUR WORKFLOW: sphere_workflow.syn
+================================================================================
+
+Document ID : 2babb2e1-cce7-4170-a39f-469b08627065
+
+Input:
+  Name     : Radius
+  ID       : 5e9a5423-84a3-4983-8b11-0c22c0d66787
+  Type     : Floating point number (SyneraDouble)
+  Default  : 0.5
+
+Output:
+  Name     : sphere
+  ID       : 2a4e20c1-a5a5-49e6-ba75-a7f3ac41e65f
+  Type     : General graph data (Body — Solid Body)
+
+input.json for this workflow:
+[
+  {
+    "id": "5e9a5423-84a3-4983-8b11-0c22c0d66787",
+    "name": "Radius",
+    "typeName": "Floating point number",
+    "value": {
+      "stringValue": {
+        "0": ["5.0"]
+      }
+    }
+  }
+]
+
+Export the sphere as STEP:
+  --exportformat .step  (or .x_t for Parasolid)
+
+Export as STL (mesh — may require a Mesh output, not a Body):
+  --exportformat .stl
+
+
+================================================================================
+PYTHON WRAPPER: run_synera.py
+================================================================================
+
+Subcommands:
+  python run_synera.py info [--template input_template.json]
+  python run_synera.py execute [--jsoninput FILE | --input V1 V2 ...]
+                               [--exportformat EXT ...]
+                               [--exportdirectory DIR]
+                               [--exportnaming Name|Guid]
+                               [--screenshot FILE]
+                               [--screenshot-quality N]
+                               [--allownulls]
+
+Common flags (all subcommands):
+  --exe      path to syneraheadless.exe   (default: syneraheadless.exe on PATH)
+  --workflow path to .syn file            (default: sphere_workflow.syn)
+  --output   path for output JSON         (default: output.json)
+
+Recommended first-run sequence:
+  1. python run_synera.py info --template input_template.json
+  2. Edit input_template.json  (replace "<Enter value here>" with actual values)
+  3. python run_synera.py execute --jsoninput input_template.json

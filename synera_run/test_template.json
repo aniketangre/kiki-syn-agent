@@ -1,0 +1,14 @@
+[
+  {
+    "id": "1b6adaa5-4180-48b5-aee2-e50ed164da4b",
+    "name": "radius",
+    "typeName": "Floating point number",
+    "value": {
+      "stringValue": {
+        "0": [
+          "5.0"
+        ]
+      }
+    }
+  }
+]

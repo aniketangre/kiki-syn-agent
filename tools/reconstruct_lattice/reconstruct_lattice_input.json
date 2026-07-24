@@ -1,0 +1,62 @@
+[
+  {
+    "id": "70d78373-138a-4dcb-8e45-cd9fe9e6ba19",
+    "name": "x_rotation",
+    "typeName": "Floating point number",
+    "value": {
+      "stringValue": {
+        "0": [
+          "0"
+        ]
+      }
+    }
+  },
+  {
+    "id": "0a23115a-a775-42ee-8ae3-63917b02b950",
+    "name": "y_rotation",
+    "typeName": "Floating point number",
+    "value": {
+      "stringValue": {
+        "0": [
+          "0"
+        ]
+      }
+    }
+  },
+  {
+    "id": "1569afc0-9858-440d-ad12-cbd30bca8531",
+    "name": "z_rotation",
+    "typeName": "Floating point number",
+    "value": {
+      "stringValue": {
+        "0": [
+          "0"
+        ]
+      }
+    }
+  },
+  {
+    "id": "c6befd63-96d7-4088-bc1b-5a2821ece07a",
+    "name": "cell_type",
+    "typeName": "Text",
+    "value": {
+      "stringValue": {
+        "0": [
+          "GYR"
+        ]
+      }
+    }
+  },
+  {
+    "id": "f758d31b-9516-45fa-aa47-cf093aa016e6",
+    "name": "vol_frac",
+    "typeName": "Floating point number",
+    "value": {
+      "stringValue": {
+        "0": [
+          "0.25"
+        ]
+      }
+    }
+  }
+]
