@@ -274,11 +274,43 @@ for msg in st.session_state.messages:
         _render_assistant(msg["content"], msg.get("image"))
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _describe_tool(name: str, args: dict) -> str:
+    """Return a plain-English sentence describing what the agent is about to do."""
+    if name == "kiki_recommend":
+        condition = args.get("bone_condition", "unknown")
+        weight    = args.get("body_weight", "?")
+        return (f"I have everything I need. I'll run the **KIKI ML model** to recommend "
+                f"the optimal lattice for a **{condition}** patient weighing **{weight} kg**.")
+    if name == "reconstruct_lattice":
+        cell = args.get("cell_type", "?")
+        vf   = args.get("vol_frac", 0.25)
+        rx   = args.get("x_rotation", 0)
+        ry   = args.get("y_rotation", 0)
+        rz   = args.get("z_rotation", 0)
+        rot  = f"{rx}° / {ry}° / {rz}°" if any([rx, ry, rz]) else "no rotation"
+        return (f"I'll reconstruct a **{cell}** lattice in Synera — "
+                f"volume fraction **{vf}**, rotation {rot}.")
+    if name == "create_sphere":
+        return f"I'll create a sphere with radius **{args.get('radius', '?')}** in Synera."
+    if name == "create_pattern":
+        labels = {0: "Curved Beam", 1: "Glass Sponge 1", 2: "Glass Sponge 2"}
+        pt = labels.get(args.get("pattern_type", 1), "surface pattern")
+        return f"I'll create a **{pt}** surface pattern in Synera."
+    return f"I'm ready to call `{name}`."
+
+
+# ---------------------------------------------------------------------------
 # HITL interrupt UI — shown whenever the graph is paused before a tool call
 # ---------------------------------------------------------------------------
 
 if st.session_state.pending_interrupt is not None:
     tool_info = st.session_state.pending_interrupt
+
+    # Short plain-English description shown as an assistant bubble
+    _render_assistant(_describe_tool(tool_info["name"], tool_info["args"]))
 
     with st.container(border=True):
         st.markdown("#### Confirm Tool Execution")
