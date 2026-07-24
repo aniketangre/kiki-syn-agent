@@ -150,7 +150,9 @@ Available agents:
   responder — everything else: greetings, clarifications, general questions.
 
 Routing rules (apply the first that matches):
-  1. "recommend / optimise / best lattice for [patient type]"              → kiki
+  1. User asks to design an implant, wants a lattice recommendation, or
+     asks about optimising for a patient (hip implant, bone implant,
+     "recommend", "optimise", "best lattice for", etc.)                    → kiki
   2. The last assistant message was kiki asking for missing patient data
      (bone condition or body weight) and the user is providing it          → kiki
   3. kiki already returned recommended_cell_type in this turn              → synera
