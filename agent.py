@@ -151,9 +151,14 @@ Available agents:
 
 Routing rules (apply the first that matches):
   1. "recommend / optimise / best lattice for [patient type]"              → kiki
-  2. kiki already returned recommended_cell_type in this turn              → synera
-  3. "reconstruct / create / make [lattice / sphere / pattern]"            → synera
-  4. Everything else                                                       → responder
+  2. The last assistant message was kiki asking for missing patient data
+     (bone condition or body weight) and the user is providing it          → kiki
+  3. kiki already returned recommended_cell_type in this turn              → synera
+  4. "reconstruct / create / make [lattice / sphere / pattern]"            → synera
+  5. Everything else                                                       → responder
+
+To apply rule 2: look at the last assistant message in the conversation.
+If it asked for bone condition or body weight, the user's reply belongs to kiki.
 """)
 
 _KIKI_PROMPT = SystemMessage(content=f"""
