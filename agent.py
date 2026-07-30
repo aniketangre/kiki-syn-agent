@@ -498,9 +498,14 @@ def load_messages(thread_id: str) -> list[dict]:
 # HITL result processor — shared by chat(), resume(), cancel()
 # ---------------------------------------------------------------------------
 
-def _process_result(result: dict, config: dict) -> tuple[str, list[str], dict | None]:
+def _process_result(result: dict, config: dict, pre_count: int = 0) -> tuple[str, list[str], dict | None]:
     """
     Extract reply text, PNG paths, and pending tool info from a graph result.
+
+    pre_count: number of messages that existed in the graph state before this
+    invocation. Only messages added after that index are scanned for reply text,
+    which prevents earlier agents' replies from being rendered a second time when
+    a later agent finishes (e.g. the kiki summary re-appearing after synera runs).
 
     When the graph is paused at a HITL interrupt, the pending AIMessage with
     tool_calls lives inside the sub-graph's state. We access it via
@@ -538,7 +543,11 @@ def _process_result(result: dict, config: dict) -> tuple[str, list[str], dict | 
     conversational: list[str] = []
     png_paths: list[str] = []
 
-    for msg in reversed(result.get("messages", [])):
+    # Slice to only the messages added in this invocation so that earlier agents'
+    # replies are never re-collected on subsequent resume() calls.
+    new_msgs = result.get("messages", [])[pre_count:]
+
+    for msg in reversed(new_msgs):
         if isinstance(msg, HumanMessage):
             break
         if isinstance(msg, ToolMessage):
@@ -610,11 +619,13 @@ def chat(thread_id: str, user_message: str) -> tuple[str, list[str], dict | None
     """
     config = {"configurable": {"thread_id": thread_id}}
     try:
+        state_before = graph.get_state(config)
+        pre_count = len(state_before.values.get("messages", [])) if state_before.values else 0
         result = graph.invoke(
             {"messages": [HumanMessage(content=user_message)]},
             config=config,
         )
-        return _process_result(result, config)
+        return _process_result(result, config, pre_count=pre_count)
     except Exception as e:
         return f"An error occurred: {e}", [], None
 
@@ -628,8 +639,10 @@ def resume(thread_id: str) -> tuple[str, list[str], dict | None]:
     """
     config = {"configurable": {"thread_id": thread_id}}
     try:
+        state_before = graph.get_state(config)
+        pre_count = len(state_before.values.get("messages", [])) if state_before.values else 0
         result = graph.invoke(Command(resume=True), config=config)
-        return _process_result(result, config)
+        return _process_result(result, config, pre_count=pre_count)
     except Exception as e:
         return f"An error occurred: {e}", [], None
 

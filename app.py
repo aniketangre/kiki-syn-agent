@@ -115,6 +115,8 @@ if "pending_prompt"    not in st.session_state:
     st.session_state.pending_prompt    = None
 if "pending_interrupt" not in st.session_state:
     st.session_state.pending_interrupt = None  # None or {"name": str, "args": dict}
+if "changing_values"   not in st.session_state:
+    st.session_state.changing_values   = False  # True when the change-values form is open
 
 # ---------------------------------------------------------------------------
 # Sidebar
@@ -133,6 +135,7 @@ with st.sidebar:
         st.session_state.messages          = []
         st.session_state.pending_prompt    = None
         st.session_state.pending_interrupt = None
+        st.session_state.changing_values   = False
         st.rerun()
 
     st.divider()
@@ -177,6 +180,7 @@ with st.sidebar:
                         st.session_state.messages          = load_messages(conv["thread_id"])
                         st.session_state.pending_prompt    = None
                         st.session_state.pending_interrupt = None
+                        st.session_state.changing_values   = False
                         st.rerun()
                 with col_del:
                     if st.button("🗑", key=f"del_{conv['thread_id']}",
@@ -236,6 +240,19 @@ def _render_assistant(content: str, image: Path | None = None):
         st.markdown(content)
         if image and image.exists():
             st.image(image.read_bytes(), width=380)
+
+
+def _save_image(png_paths: list[str], thread_id: str) -> Path | None:
+    """Copy the first valid PNG from a tool result into the images dir and persist its path."""
+    for raw_path in png_paths:
+        raw = Path(raw_path)
+        if raw.exists():
+            ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
+            dest = _IMAGES_DIR / f"{raw.stem}_{ts}.png"
+            shutil.copy2(raw, dest)
+            save_message_image(thread_id, str(dest))
+            return dest
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -312,54 +329,185 @@ if st.session_state.pending_interrupt is not None:
     # Plain-English description as an assistant bubble
     _render_assistant(_describe_tool(tool_info["name"], tool_info["args"]))
 
-    # Minimal yes / no prompt — no JSON, no repeated parameters
     with st.chat_message("assistant", avatar="🧊"):
-        st.markdown("Shall I proceed?")
-        col_yes, col_no, col_pad = st.columns([1, 1, 4])
 
-        with col_yes:
-            if st.button("✓ Yes", type="primary",
-                         use_container_width=True, key="hitl_confirm"):
-                st.session_state.pending_interrupt = None
+        if not st.session_state.changing_values:
+            # ── Confirmation buttons ──────────────────────────────────────────
+            st.markdown("Shall I proceed?")
+            col_yes, col_no, col_change, col_pad = st.columns([1, 1, 1.5, 2.5])
 
-                thinking_slot_h = st.empty()
-                with thinking_slot_h.container():
-                    with st.chat_message("assistant", avatar="🧊"):
-                        st.markdown(THINKING_HTML, unsafe_allow_html=True)
+            with col_yes:
+                if st.button("✓ Yes", type="primary",
+                             use_container_width=True, key="hitl_confirm"):
+                    st.session_state.pending_interrupt = None
+                    st.session_state.changing_values   = False
 
-                reply_r, png_paths_r, next_interrupt = resume(st.session_state.thread_id)
-                st.session_state.pending_interrupt = next_interrupt
+                    thinking_slot_h = st.empty()
+                    with thinking_slot_h.container():
+                        with st.chat_message("assistant", avatar="🧊"):
+                            st.markdown(THINKING_HTML, unsafe_allow_html=True)
 
-                new_image_r = None
-                for raw_path in png_paths_r:
-                    raw = Path(raw_path)
-                    if raw.exists():
-                        ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        dest = _IMAGES_DIR / f"{raw.stem}_{ts}.png"
-                        shutil.copy2(raw, dest)
-                        save_message_image(st.session_state.thread_id, str(dest))
-                        new_image_r = dest
-                        break
+                    reply_r, png_paths_r, next_interrupt = resume(st.session_state.thread_id)
+                    st.session_state.pending_interrupt = next_interrupt
+                    new_image_r = _save_image(png_paths_r, st.session_state.thread_id)
 
-                thinking_slot_h.empty()
-                if reply_r:
-                    _render_assistant(reply_r, new_image_r)
+                    thinking_slot_h.empty()
+                    if reply_r:
+                        _render_assistant(reply_r, new_image_r)
+                        st.session_state.messages.append({
+                            "role": "assistant", "content": reply_r, "image": new_image_r,
+                        })
+
+                    st.rerun()
+
+            with col_no:
+                if st.button("✗ No", type="secondary",
+                             use_container_width=True, key="hitl_cancel"):
+                    st.session_state.pending_interrupt = None
+                    st.session_state.changing_values   = False
+                    cancel_text, _, _ = cancel(st.session_state.thread_id)
+                    _render_assistant(cancel_text)
                     st.session_state.messages.append({
-                        "role": "assistant", "content": reply_r, "image": new_image_r,
+                        "role": "assistant", "content": cancel_text, "image": None,
                     })
+                    st.rerun()
 
+            with col_change:
+                if st.button("✏ Change values", use_container_width=True, key="hitl_change"):
+                    st.session_state.changing_values = True
+                    st.rerun()
+
+        else:
+            # ── Change-values form ────────────────────────────────────────────
+            name = tool_info["name"]
+            args = tool_info["args"]
+
+            st.markdown("**Update the values:**")
+
+            with st.form("hitl_change_form"):
+
+                if name == "kiki_recommend":
+                    options  = ["osteoporotic", "elderly", "normal", "athletic"]
+                    cur_cond = args.get("bone_condition", "normal")
+                    bone = st.selectbox(
+                        "Bone condition", options,
+                        index=options.index(cur_cond) if cur_cond in options else 2,
+                    )
+                    weight = st.number_input(
+                        "Body weight (kg)",
+                        value=float(args.get("body_weight", 70)),
+                        min_value=1.0, max_value=300.0, step=0.5,
+                    )
+
+                elif name == "reconstruct_lattice":
+                    cell_types = [
+                        "GYR", "SCH", "DTPMS", "SPP", "SC", "BCC", "FCC", "DIA",
+                        "FLU", "OCT", "KEV", "DDK2", "HCG", "PSM2", "RDO", "TEG3",
+                    ]
+                    cur_cell = args.get("cell_type", "BCC")
+                    cell = st.selectbox(
+                        "Cell type", cell_types,
+                        index=cell_types.index(cur_cell) if cur_cell in cell_types else 0,
+                    )
+                    vf = st.slider(
+                        "Volume fraction", 0.0, 1.0,
+                        float(args.get("vol_frac", 0.25)), step=0.05,
+                    )
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        xr = st.number_input("X rotation (°)", value=float(args.get("x_rotation", 0)), step=1.0)
+                    with c2:
+                        yr = st.number_input("Y rotation (°)", value=float(args.get("y_rotation", 0)), step=1.0)
+                    with c3:
+                        zr = st.number_input("Z rotation (°)", value=float(args.get("z_rotation", 0)), step=1.0)
+
+                elif name == "create_sphere":
+                    radius = st.number_input(
+                        "Radius",
+                        value=float(args.get("radius", 1.0)),
+                        min_value=0.01, step=0.1,
+                    )
+
+                elif name == "create_pattern":
+                    pt_labels = ["Curved Beam", "Glass Sponge 1", "Glass Sponge 2"]
+                    cur_pt    = args.get("pattern_type", 1)
+                    pt = st.selectbox(
+                        "Pattern type", pt_labels,
+                        index=cur_pt if isinstance(cur_pt, int) and cur_pt < 3 else 1,
+                    )
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        us = st.number_input(
+                            "U spacing",
+                            value=float(args.get("u_spacing", 0.5)),
+                            min_value=0.01, step=0.05,
+                        )
+                    with c2:
+                        vs = st.number_input(
+                            "V spacing",
+                            value=float(args.get("v_spacing", 0.5)),
+                            min_value=0.01, step=0.05,
+                        )
+
+                col_submit, col_back = st.columns([2, 1])
+                with col_submit:
+                    submitted = st.form_submit_button(
+                        "Update & Proceed", type="primary", use_container_width=True,
+                    )
+                with col_back:
+                    go_back = st.form_submit_button("← Back", use_container_width=True)
+
+            if go_back:
+                st.session_state.changing_values = False
                 st.rerun()
 
-        with col_no:
-            if st.button("✗ No", type="secondary",
-                         use_container_width=True, key="hitl_cancel"):
-                st.session_state.pending_interrupt = None
-                cancel_text, _, _ = cancel(st.session_state.thread_id)
-                _render_assistant(cancel_text)
-                st.session_state.messages.append({
-                    "role": "assistant", "content": cancel_text, "image": None,
-                })
-                st.rerun()
+            if submitted:
+                # Build a correction message that the supervisor will route correctly
+                correction_msg = None
+                if name == "kiki_recommend":
+                    correction_msg = (
+                        f"Please recommend a lattice with bone condition {bone} "
+                        f"and body weight {weight} kg."
+                    )
+                elif name == "reconstruct_lattice":
+                    rot_parts = []
+                    if xr: rot_parts.append(f"x_rotation={int(xr)}")
+                    if yr: rot_parts.append(f"y_rotation={int(yr)}")
+                    if zr: rot_parts.append(f"z_rotation={int(zr)}")
+                    rot_str = (", " + ", ".join(rot_parts)) if rot_parts else ""
+                    correction_msg = f"Reconstruct a {cell} lattice with volume fraction {vf}{rot_str}."
+                elif name == "create_sphere":
+                    correction_msg = f"Create a sphere with radius {radius}."
+                elif name == "create_pattern":
+                    correction_msg = (
+                        f"Create a {pt} surface pattern with u_spacing={us}, v_spacing={vs}."
+                    )
+
+                if correction_msg:
+                    cancel(st.session_state.thread_id)
+                    st.session_state.pending_interrupt = None
+                    st.session_state.changing_values   = False
+
+                    st.session_state.messages.append({"role": "user", "content": correction_msg, "image": None})
+                    _render_user(correction_msg)
+
+                    thinking_slot_c = st.empty()
+                    with thinking_slot_c.container():
+                        with st.chat_message("assistant", avatar="🧊"):
+                            st.markdown(THINKING_HTML, unsafe_allow_html=True)
+
+                    reply_c, png_paths_c, next_interrupt_c = chat(st.session_state.thread_id, correction_msg)
+                    st.session_state.pending_interrupt = next_interrupt_c
+                    new_image_c = _save_image(png_paths_c, st.session_state.thread_id)
+
+                    thinking_slot_c.empty()
+                    if reply_c:
+                        _render_assistant(reply_c, new_image_c)
+                        st.session_state.messages.append({
+                            "role": "assistant", "content": reply_c, "image": new_image_c,
+                        })
+
+                    st.rerun()
 
 # ---------------------------------------------------------------------------
 # Input + agent call
@@ -394,17 +542,7 @@ if to_process and st.session_state.pending_interrupt is None:
     # Run agent — returns reply text, PNG paths, and optional pending tool
     reply, png_paths, pending_tool = chat(st.session_state.thread_id, to_process)
     st.session_state.pending_interrupt = pending_tool
-
-    new_image = None
-    for raw_path in png_paths:
-        raw = Path(raw_path)
-        if raw.exists():
-            ts        = datetime.now().strftime("%Y%m%d_%H%M%S")
-            dest      = _IMAGES_DIR / f"{raw.stem}_{ts}.png"
-            shutil.copy2(raw, dest)
-            save_message_image(st.session_state.thread_id, str(dest))
-            new_image = dest
-            break
+    new_image = _save_image(png_paths, st.session_state.thread_id)
 
     # Show reply (may be empty if the graph paused immediately at the interrupt)
     thinking_slot.empty()
