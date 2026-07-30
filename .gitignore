@@ -23,6 +23,7 @@ diagrams/
 
 # Synera tool output files (generated at runtime)
 tools/*/Results/
+tools/*/*_output.json
 synera_run/output.json
 synera_run/test_output.json
 
