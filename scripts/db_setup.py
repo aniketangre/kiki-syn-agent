@@ -12,7 +12,7 @@ What it does:
   3. Creates the LangGraph checkpointer tables inside that database
 
 Requirements:
-  - PostgreSQL must be installed and running locally
+  - Docker must be running and the container started: docker compose up -d
   - The user in POSTGRES_URI must have CREATE DATABASE permissions
 
 Configuration:
@@ -70,11 +70,33 @@ except psycopg.OperationalError as e:
 # Step 2: Create LangGraph checkpointer tables inside the target database
 # ---------------------------------------------------------------------------
 
+print("Enabling pgvector extension ...")
+
+with psycopg.connect(POSTGRES_URI, autocommit=True) as conn:
+    conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    print("pgvector extension ready.")
+
 print("Setting up LangGraph checkpointer tables ...")
 
-with psycopg.connect(POSTGRES_URI) as conn:
+with psycopg.connect(POSTGRES_URI, autocommit=True) as conn:
     checkpointer = PostgresSaver(conn)
     checkpointer.setup()
+
+# Tracks which files have been ingested and their content hash.
+# ingest.py uses this to skip unchanged files on subsequent runs.
+print("Setting up RAG ingestion tracking table ...")
+
+with psycopg.connect(POSTGRES_URI) as conn:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ingested_files (
+            filename    TEXT        PRIMARY KEY,
+            file_hash   TEXT        NOT NULL,
+            chunk_count INTEGER     NOT NULL,
+            ingested_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """)
+    conn.commit()
+    print("ingested_files table ready.")
 
 print("\nSetup complete. You can now run the agent:")
 print("  python agent.py")

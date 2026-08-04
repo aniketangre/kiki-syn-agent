@@ -1,16 +1,16 @@
 """
 agent.py  —  Multi-agent supervisor with HITL interrupts and LLM fallback
 --------------------------------------------------------------------------
-Extends agent3.py with Human-in-the-Loop (HITL) confirmation before every
-tool call. The graph pauses automatically before executing any tool and
-waits for the caller to call resume() or cancel().
+Implements a LangGraph supervisor that routes each user message to one of
+four specialised sub-agents. The graph pauses automatically before executing
+any tool and waits for the caller to call resume() or cancel().
 
-Architecture change from agent3.py
-------------------------------------
-kiki_subgraph and synera_subgraph are now added as REAL sub-graph nodes
-in the parent graph (instead of being called via .invoke() inside wrapper
-functions). This is required for interrupt_before=["tools"] to propagate
-to the parent graph's checkpointer and be resumable.
+Architecture
+------------
+kiki_subgraph and synera_subgraph are REAL sub-graph nodes in the parent
+graph (not called via .invoke() inside wrapper functions). This is required
+for interrupt_before=["tools"] to propagate to the parent graph's
+checkpointer and be resumable across HTTP requests.
 
 HITL public API
 ---------------
@@ -57,6 +57,7 @@ from tools.create_pattern.create_pattern_tool import create_pattern
 from tools.reconstruct_lattice.reconstruct_lattice_tool import reconstruct_lattice
 from tools.kiki_recommend.kiki_recommend_tool import kiki_recommend
 from tools.kiki_recommend.bounds import get_bounds_summary
+from tools.rag_search.rag_search_tool import rag_search
 from config.presets import get_preset_summary
 
 load_dotenv()
@@ -91,6 +92,11 @@ class SyneraAgentState(TypedDict):
     messages:        Annotated[list, add_messages]
     remaining_steps: RemainingSteps
 
+class KnowledgeAgentState(TypedDict):
+    """Private state for the knowledge / RAG sub-agent."""
+    messages:        Annotated[list, add_messages]
+    remaining_steps: RemainingSteps
+
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
@@ -118,7 +124,7 @@ _base_llm = _primary_llm.with_fallbacks(
 )
 
 class _RouteDecision(BaseModel):
-    next: Literal["kiki", "synera", "responder"]
+    next: Literal["kiki", "synera", "knowledge", "responder"]
 
 _supervisor_llm = _primary_llm.with_structured_output(_RouteDecision).with_fallbacks(
     [_fallback_llm.with_structured_output(_RouteDecision)],
@@ -147,6 +153,8 @@ Available agents:
                Use when the user gives explicit geometry parameters, OR when
                the kiki agent has just produced cell_type and rotation values
                that should now be passed to reconstruct_lattice.
+  knowledge — answers questions using the project knowledge base (documentation,
+               research papers, technical specs about Synera or KIKI).
   responder — everything else: greetings, clarifications, general questions.
 
 Routing rules (apply the first that matches):
@@ -157,7 +165,10 @@ Routing rules (apply the first that matches):
      (bone condition or body weight) and the user is providing it          → kiki
   3. kiki already returned recommended_cell_type in this turn              → synera
   4. "reconstruct / create / make [lattice / sphere / pattern]"            → synera
-  5. Everything else                                                       → responder
+  5. User asks "how does X work", "what is X", "explain X", or asks about
+     Synera parameters, KIKI methodology, lattice types, biomechanics,
+     implant design principles, or wants reference information             → knowledge
+  6. Everything else                                                       → responder
 
 To apply rule 2: look at the last assistant message in the conversation.
 If it asked for bone condition or body weight, the user's reply belongs to kiki.
@@ -226,6 +237,33 @@ Answer general questions about the system, lattice structures, or biomechanics.
 For geometry creation or patient optimisation, let the user know they can ask you.
 """)
 
+_RAG_PROMPT = SystemMessage(content="""
+You are a knowledgeable assistant for the KIKI and Synera project.
+
+You have two sources of knowledge — use them for different purposes:
+
+  General knowledge (LLM training):
+    Use freely for concepts, definitions, background explanations.
+    Example: "What is finite element analysis?" or "What does volume fraction mean?"
+
+  Project knowledge base (rag_search tool):
+    Use for specific facts from the project documents — measurements, force values,
+    paper conclusions, methodology details, or anything where precision matters.
+    Example: "What peak force was measured during stumbling?" or "What ISO standard
+    applies to hip implant fatigue testing?"
+
+Rules for using rag_search:
+  1. Call rag_search whenever the question asks for specific numbers, results,
+     or conclusions that should come from a document.
+  2. Only state specific facts (numbers, thresholds, named results) if they appear
+     in the retrieved text. Never invent or recall specific figures from memory.
+  3. If rag_search returns no relevant results, say:
+     "I don't have that specific information in the knowledge base."
+     You may still give a general conceptual answer if relevant.
+  4. Always cite the source filename when reporting a specific fact from a document.
+  5. For geometry creation or patient optimisation, tell the user to ask directly.
+""")
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -278,6 +316,12 @@ def _synera_messages_modifier(state) -> list:
     messages = state["messages"] if isinstance(state, dict) else list(state)
     return [_SYNERA_PROMPT] + _trim(messages)
 
+
+def _rag_messages_modifier(state) -> list:
+    """Trim history and prepend RAG system prompt before each LLM call."""
+    messages = state["messages"] if isinstance(state, dict) else list(state)
+    return [_RAG_PROMPT] + _trim(messages)
+
 # ---------------------------------------------------------------------------
 # Sub-agent compiled graphs (real sub-graph nodes — required for HITL)
 # ---------------------------------------------------------------------------
@@ -298,6 +342,15 @@ synera_subgraph = create_react_agent(
     state_schema=SyneraAgentState,
     interrupt_before=["tools"],        # pause before every tool call for HITL
     name="synera_agent",
+)
+
+rag_subgraph = create_react_agent(
+    model=_base_llm,
+    tools=[rag_search],
+    prompt=_rag_messages_modifier,
+    state_schema=KnowledgeAgentState,
+    # no interrupt_before — knowledge retrieval is read-only, no confirmation needed
+    name="knowledge_agent",
 )
 
 # ---------------------------------------------------------------------------
@@ -346,25 +399,32 @@ def _route_after_kiki(state: SupervisorState) -> str:
 
 _builder = StateGraph(SupervisorState)
 
-_builder.add_node("supervisor",   supervisor_node)
-_builder.add_node("kiki_agent",   kiki_subgraph)   # real sub-graph — supports HITL
-_builder.add_node("synera_agent", synera_subgraph) # real sub-graph — supports HITL
-_builder.add_node("responder",    responder_node)
+_builder.add_node("supervisor",      supervisor_node)
+_builder.add_node("kiki_agent",      kiki_subgraph)      # real sub-graph — supports HITL
+_builder.add_node("synera_agent",    synera_subgraph)    # real sub-graph — supports HITL
+_builder.add_node("knowledge_agent", rag_subgraph)       # real sub-graph — no HITL
+_builder.add_node("responder",       responder_node)
 
 _builder.set_entry_point("supervisor")
 
 _builder.add_conditional_edges(
     "supervisor",
     _route_from_supervisor,
-    {"kiki": "kiki_agent", "synera": "synera_agent", "responder": "responder"},
+    {
+        "kiki":      "kiki_agent",
+        "synera":    "synera_agent",
+        "knowledge": "knowledge_agent",
+        "responder": "responder",
+    },
 )
 _builder.add_conditional_edges(
     "kiki_agent",
     _route_after_kiki,
     {"supervisor": "supervisor", END: END},
 )
-_builder.add_edge("synera_agent", END)
-_builder.add_edge("responder",    END)
+_builder.add_edge("synera_agent",    END)
+_builder.add_edge("knowledge_agent", END)
+_builder.add_edge("responder",       END)
 
 # ---------------------------------------------------------------------------
 # SQLite checkpointer

@@ -34,9 +34,17 @@ streamlit
 # SQLite checkpointer for LangGraph — persists conversations to disk
 langgraph-checkpoint-sqlite
 
+# RAG pipeline — vector store, embeddings, document loaders
+langchain-postgres
+langchain-community
+langchain-text-splitters
+pgvector
+pypdf
+
 # PostgreSQL checkpointer for LangGraph — persists conversation history
 langgraph-checkpoint-postgres
 
 # PostgreSQL driver (psycopg3) required by langgraph-checkpoint-postgres
 psycopg[binary]
 psycopg-pool
+
