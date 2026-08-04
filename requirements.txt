@@ -31,9 +31,6 @@ requests
 # Streamlit — local chat UI
 streamlit
 
-# SQLite checkpointer for LangGraph — persists conversations to disk
-langgraph-checkpoint-sqlite
-
 # RAG pipeline — vector store, embeddings, document loaders
 langchain-postgres
 langchain-community

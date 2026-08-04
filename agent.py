@@ -31,19 +31,19 @@ Excluded : AuthenticationError — bad key, needs a human fix
 
 import json
 import os
-import sqlite3
 import uuid
 from pathlib import Path
 from typing import Annotated, Literal
 
 import openai
+import psycopg
 from dotenv import load_dotenv
 from langchain_core.messages import (
     AIMessage, AIMessageChunk, HumanMessage, SystemMessage, ToolMessage,
 )
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
-from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.managed import RemainingSteps
@@ -65,7 +65,7 @@ load_dotenv()
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 OPENAI_MODEL   = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
-SQLITE_DB_PATH = os.environ.get("SQLITE_DB_PATH", "conversations.db")
+POSTGRES_URI   = os.environ.get("POSTGRES_URI", "")
 
 # ---------------------------------------------------------------------------
 # States — each agent owns its own TypedDict
@@ -427,50 +427,50 @@ _builder.add_edge("knowledge_agent", END)
 _builder.add_edge("responder",       END)
 
 # ---------------------------------------------------------------------------
-# SQLite checkpointer
+# PostgreSQL checkpointer
 # ---------------------------------------------------------------------------
 
-_sqlite_conn = sqlite3.connect(SQLITE_DB_PATH, check_same_thread=False)
-checkpointer = SqliteSaver(_sqlite_conn)
+# autocommit=True is required by PostgresSaver for its internal operations.
+# prepare_threshold=0 disables prepared statements to avoid conflicts.
+_pg_conn     = psycopg.connect(POSTGRES_URI, autocommit=True, prepare_threshold=0)
+checkpointer = PostgresSaver(_pg_conn)
 graph        = _builder.compile(checkpointer=checkpointer)
 
 # ---------------------------------------------------------------------------
 # Conversations metadata tables
 # ---------------------------------------------------------------------------
 
-_sqlite_conn.execute("""
+_pg_conn.execute("""
     CREATE TABLE IF NOT EXISTS conversations (
-        thread_id  TEXT PRIMARY KEY,
-        title      TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        thread_id  TEXT        PRIMARY KEY,
+        title      TEXT        NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
 """)
-_sqlite_conn.execute("""
+_pg_conn.execute("""
     CREATE TABLE IF NOT EXISTS message_images (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        thread_id   TEXT NOT NULL,
-        image_path  TEXT NOT NULL,
-        created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        id          BIGSERIAL   PRIMARY KEY,
+        thread_id   TEXT        NOT NULL,
+        image_path  TEXT        NOT NULL,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
     )
 """)
-_sqlite_conn.commit()
 
 # ---------------------------------------------------------------------------
-# Public SQLite helpers
+# Public PostgreSQL helpers
 # ---------------------------------------------------------------------------
 
 def save_conversation(thread_id: str, title: str) -> None:
-    """Register a conversation title. INSERT OR IGNORE — saves only once."""
-    _sqlite_conn.execute(
-        "INSERT OR IGNORE INTO conversations (thread_id, title) VALUES (?, ?)",
+    """Register a conversation title. ON CONFLICT DO NOTHING — saves only once."""
+    _pg_conn.execute(
+        "INSERT INTO conversations (thread_id, title) VALUES (%s, %s) ON CONFLICT DO NOTHING",
         (thread_id, title[:60]),
     )
-    _sqlite_conn.commit()
 
 
 def list_conversations() -> list[dict]:
     """Return all conversations ordered newest first."""
-    rows = _sqlite_conn.execute(
+    rows = _pg_conn.execute(
         "SELECT thread_id, title, created_at FROM conversations ORDER BY created_at DESC"
     ).fetchall()
     return [{"thread_id": r[0], "title": r[1], "created_at": r[2]} for r in rows]
@@ -478,17 +478,16 @@ def list_conversations() -> list[dict]:
 
 def save_message_image(thread_id: str, image_path: str) -> None:
     """Persist the image path produced by a tool run."""
-    _sqlite_conn.execute(
-        "INSERT INTO message_images (thread_id, image_path) VALUES (?, ?)",
+    _pg_conn.execute(
+        "INSERT INTO message_images (thread_id, image_path) VALUES (%s, %s)",
         (thread_id, image_path),
     )
-    _sqlite_conn.commit()
 
 
 def delete_conversation(thread_id: str) -> None:
     """Delete a conversation: image files, metadata rows, and LangGraph checkpoints."""
-    rows = _sqlite_conn.execute(
-        "SELECT image_path FROM message_images WHERE thread_id = ?",
+    rows = _pg_conn.execute(
+        "SELECT image_path FROM message_images WHERE thread_id = %s",
         (thread_id,),
     ).fetchall()
     for (image_path,) in rows:
@@ -498,14 +497,16 @@ def delete_conversation(thread_id: str) -> None:
                 p.unlink()
         except Exception:
             pass
-    _sqlite_conn.execute("DELETE FROM message_images WHERE thread_id = ?", (thread_id,))
-    _sqlite_conn.execute("DELETE FROM conversations WHERE thread_id = ?",  (thread_id,))
-    for table in ("checkpoints", "writes"):
-        try:
-            _sqlite_conn.execute(f"DELETE FROM {table} WHERE thread_id = ?", (thread_id,))
-        except Exception:
-            pass
-    _sqlite_conn.commit()
+
+    # Wrap deletes in an explicit transaction for atomicity
+    with _pg_conn.transaction():
+        _pg_conn.execute("DELETE FROM message_images WHERE thread_id = %s", (thread_id,))
+        _pg_conn.execute("DELETE FROM conversations  WHERE thread_id = %s", (thread_id,))
+        for table in ("checkpoints", "checkpoint_blobs", "checkpoint_writes"):
+            try:
+                _pg_conn.execute(f"DELETE FROM {table} WHERE thread_id = %s", (thread_id,))
+            except Exception:
+                pass
 
 
 def load_messages(thread_id: str) -> list[dict]:
@@ -519,8 +520,8 @@ def load_messages(thread_id: str) -> list[dict]:
     if not state or not state.values:
         return []
 
-    rows = _sqlite_conn.execute(
-        "SELECT image_path FROM message_images WHERE thread_id = ? ORDER BY id ASC",
+    rows = _pg_conn.execute(
+        "SELECT image_path FROM message_images WHERE thread_id = %s ORDER BY id ASC",
         (thread_id,),
     ).fetchall()
     images      = [Path(r[0]) for r in rows]
@@ -761,7 +762,7 @@ if __name__ == "__main__":
         thread_id = str(uuid.uuid4())
         print(f"\nNew conversation started.")
         print(f"Thread ID: {thread_id}")
-        print(f"Conversations saved to: {SQLITE_DB_PATH}")
+        print(f"Conversations saved to: PostgreSQL ({POSTGRES_URI})")
         print("(Save the thread ID above to resume this conversation later.)\n")
 
     print("Try: 'Recommend a lattice for an elderly patient'")

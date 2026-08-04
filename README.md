@@ -45,7 +45,7 @@ Four specialised agents coordinated by a supervisor:
 
 **LLM:** OpenAI (primary) with Google Gemini automatic fallback on rate limits or connection errors.  
 **Observability:** LangSmith tracing enabled via `.env`.  
-**Conversation persistence:** SQLite checkpointer — conversations survive restarts.  
+**Conversation persistence:** PostgreSQL checkpointer — conversations survive restarts, stored alongside the vector store in Docker.  
 **Knowledge base:** PostgreSQL + pgvector in Docker — semantic search over indexed research papers.
 
 ---
