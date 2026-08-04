@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16      # PostgreSQL 16 with pgvector pre-installed
+    container_name: rag_postgres
+    restart: unless-stopped            # auto-restarts on reboot, stops only if you stop it manually
+    environment:
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB:       kiki_agent
+    ports:
+      - "5432:5432"                    # expose to localhost so Python can connect normally
+    volumes:
+      - rag-postgres-data:/var/lib/postgresql/data  # persist data across container restarts
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  rag-postgres-data:                   # named volume — Docker manages the storage location

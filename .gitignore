@@ -18,6 +18,12 @@ conversations.db-wal
 images/
 output/
 
+# Chroma vector store — built locally by tools/rag_search/ingest.py
+chroma_db/
+
+# Docker overrides with local settings (e.g. different ports, bind mounts)
+docker-compose.override.yml
+
 # Generated diagrams
 diagrams/
 
