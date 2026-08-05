@@ -45,7 +45,7 @@ Four specialised agents coordinated by a supervisor:
 
 **LLM:** OpenAI (primary) with Google Gemini automatic fallback on rate limits or connection errors.  
 **Observability:** LangSmith tracing enabled via `.env`.  
-**Conversation persistence:** SQLite checkpointer — conversations survive restarts.  
+**Conversation persistence:** PostgreSQL checkpointer — conversations survive restarts, stored alongside the vector store in Docker.  
 **Knowledge base:** PostgreSQL + pgvector in Docker — semantic search over indexed research papers.
 
 ---
@@ -55,7 +55,7 @@ Four specialised agents coordinated by a supervisor:
 | Requirement | Notes |
 |---|---|
 | Python 3.10+ | Tested on 3.11 |
-| Docker Desktop | Runs PostgreSQL + pgvector for the knowledge base |
+| Docker Desktop | Runs PostgreSQL + pgvector for the knowledge base and conversation history |
 | Synera with headless license | `syneraheadless.exe` must be on PATH or set in `.env` |
 | OpenAI API key | Primary LLM — get one at platform.openai.com |
 | Google AI API key | Fallback LLM — free tier at aistudio.google.com |
@@ -165,7 +165,7 @@ kiki-syn-agent/
 │   └── presets.py              # Bone condition presets for KIKI
 │
 ├── scripts/                    # Utility scripts
-│   ├── db_setup.py             # One-time PostgreSQL + pgvector setup
+│   ├── db_setup.py             # One-time setup: pgvector, LangGraph tables, conversations tables
 │   └── visualize_graph.py      # Saves LangGraph diagrams to diagrams/
 │
 ├── tests/                      # Test suite
@@ -250,13 +250,16 @@ Runs 21 test cases derived from real facts in the indexed papers and reports an 
 
 ```powershell
 docker compose up -d        # start the database
-docker compose down         # stop (data preserved)
-docker compose down -v      # stop and delete all data
+docker compose down         # stop (data preserved — conversations and vectors kept)
+docker compose down -v      # stop and delete ALL data (conversations + vectors lost)
 docker ps                   # check container status
 docker logs rag_postgres    # view database logs
+docker volume ls            # list named volumes (rag-postgres-data)
 ```
 
 ### Backing up the database
+
+Backs up both the RAG vectors and all conversation history in one command:
 
 ```powershell
 docker exec rag_postgres pg_dump -U postgres kiki_agent > backup.sql

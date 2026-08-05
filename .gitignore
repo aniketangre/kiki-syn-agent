@@ -9,17 +9,9 @@ __pycache__/
 venv/
 *.egg-info/
 
-# LangGraph / SQLite database
-conversations.db
-conversations.db-shm
-conversations.db-wal
-
 # Generated images from Synera tool runs
 images/
 output/
-
-# Chroma vector store — built locally by tools/rag_search/ingest.py
-chroma_db/
 
 # Docker overrides with local settings (e.g. different ports, bind mounts)
 docker-compose.override.yml

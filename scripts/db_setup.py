@@ -98,5 +98,26 @@ with psycopg.connect(POSTGRES_URI) as conn:
     conn.commit()
     print("ingested_files table ready.")
 
+print("Setting up conversation history tables ...")
+
+with psycopg.connect(POSTGRES_URI) as conn:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS conversations (
+            thread_id  TEXT        PRIMARY KEY,
+            title      TEXT        NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS message_images (
+            id          BIGSERIAL   PRIMARY KEY,
+            thread_id   TEXT        NOT NULL,
+            image_path  TEXT        NOT NULL,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+    """)
+    conn.commit()
+    print("conversations and message_images tables ready.")
+
 print("\nSetup complete. You can now run the agent:")
 print("  python agent.py")
