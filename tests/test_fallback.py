@@ -1,27 +1,26 @@
 """
-test_fallback.py
-----------------
-Verifies that the OpenAI → Gemini fallback in agent3.py works correctly.
+Integration test — verifies that the OpenAI → Gemini fallback in agent.py fires
+correctly when OpenAI raises a rate limit or connection error.
 
-Simulates an OpenAI RateLimitError and confirms that Gemini picks up the call.
-
-Usage:
-    python test_fallback.py
+Requires: OPENAI_API_KEY and GOOGLE_API_KEY set in .env
+Run with: pytest tests/test_fallback.py -v -s
 """
 
-from unittest.mock import patch
-from dotenv import load_dotenv
-
-load_dotenv()
-
+import pytest
 import openai
-from agent3 import _base_llm, _supervisor_llm, _RouteDecision
+from unittest.mock import patch
 from langchain_core.messages import HumanMessage
 
+pytestmark = pytest.mark.integration
 
-def _make_rate_limit_error():
-    """Build a realistic openai.RateLimitError for the mock to raise."""
-    response = openai.BadRequestError.__new__(openai.BadRequestError)
+
+@pytest.fixture(scope="module")
+def agent_llms():
+    from agent import _base_llm, _supervisor_llm, _RouteDecision
+    return _base_llm, _supervisor_llm, _RouteDecision
+
+
+def _rate_limit_error():
     return openai.RateLimitError(
         message="Rate limit exceeded (simulated)",
         response=None,
@@ -29,46 +28,21 @@ def _make_rate_limit_error():
     )
 
 
-print("=" * 55)
-print("  agent3.py — Fallback Test")
-print("  Simulating OpenAI RateLimitError → expect Gemini reply")
-print("=" * 55)
+def test_base_llm_falls_back_to_gemini(agent_llms):
+    """_base_llm should transparently switch to Gemini on RateLimitError."""
+    base_llm, _, _ = agent_llms
+    with patch("langchain_openai.ChatOpenAI.invoke", side_effect=_rate_limit_error()):
+        reply = base_llm.invoke([HumanMessage(content="Say 'fallback ok' and nothing else.")])
+    text = reply.content if isinstance(reply.content, str) else str(reply.content)
+    assert text.strip() != ""
 
-# ── Test 1: _base_llm fallback ──────────────────────────────
-print("\n[1] Testing _base_llm (used by sub-agents and responder)...")
-try:
-    with patch(
-        "langchain_openai.ChatOpenAI.invoke",
-        side_effect=openai.RateLimitError(
-            message="Rate limit exceeded (simulated)",
-            response=None,
-            body=None,
-        ),
-    ):
-        reply = _base_llm.invoke([HumanMessage(content="Say 'fallback ok' and nothing else.")])
-        text  = reply.content if isinstance(reply.content, str) else str(reply.content)
-        print(f"   ✓ Got reply from fallback model: {text[:80]}")
-except Exception as e:
-    print(f"   ✗ Fallback did not fire — error: {e}")
 
-# ── Test 2: _supervisor_llm fallback ───────────────────────
-print("\n[2] Testing _supervisor_llm (routing with structured output)...")
-try:
-    with patch(
-        "langchain_openai.ChatOpenAI.invoke",
-        side_effect=openai.RateLimitError(
-            message="Rate limit exceeded (simulated)",
-            response=None,
-            body=None,
-        ),
-    ):
-        decision = _supervisor_llm.invoke([
+def test_supervisor_llm_falls_back_to_gemini(agent_llms):
+    """_supervisor_llm should return a valid RouteDecision from Gemini on RateLimitError."""
+    _, supervisor_llm, RouteDecision = agent_llms
+    with patch("langchain_openai.ChatOpenAI.invoke", side_effect=_rate_limit_error()):
+        decision = supervisor_llm.invoke([
             HumanMessage(content="The user wants to create a BCC lattice. Route this.")
         ])
-        print(f"   ✓ Got routing decision from fallback model: next='{decision.next}'")
-except Exception as e:
-    print(f"   ✗ Fallback did not fire — error: {e}")
-
-print("\n" + "=" * 55)
-print("  Done. Both ✓ = fallback is working correctly.")
-print("=" * 55)
+    assert isinstance(decision, RouteDecision)
+    assert decision.next in ("kiki", "synera", "knowledge", "responder")

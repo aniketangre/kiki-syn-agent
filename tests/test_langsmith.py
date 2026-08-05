@@ -1,22 +1,23 @@
 """
-test_langsmith.py
------------------
-Quick check that LangSmith tracing is reachable before running the full app.
+Integration test — verifies that LangSmith tracing is reachable.
 
-Usage:
-    python test_langsmith.py
+Requires: LANGSMITH_API_KEY set in .env
+Run with: pytest tests/test_langsmith.py -v
 """
 
-from dotenv import load_dotenv
-load_dotenv()
+import os
+import pytest
 
-from langsmith import Client
+pytestmark = pytest.mark.integration
 
-try:
-    client = Client()
+
+@pytest.mark.skipif(
+    not os.environ.get("LANGSMITH_API_KEY"),
+    reason="LANGSMITH_API_KEY not set — skipping LangSmith connectivity test",
+)
+def test_langsmith_connection():
+    """Confirm the LangSmith client can list projects without error."""
+    from langsmith import Client
+    client   = Client()
     projects = list(client.list_projects())
-    print("LangSmith connection successful.")
-    print(f"Projects found: {[p.name for p in projects]}")
-except Exception as e:
-    print(f"LangSmith connection failed: {e}")
-    print("Check: LANGSMITH_API_KEY and LANGSMITH_ENDPOINT in .env")
+    assert isinstance(projects, list)
