@@ -16,9 +16,13 @@ Usage:
     python visualize_graph.py
 """
 
+import sys
 from pathlib import Path
 
-from agent2 import graph, kiki_subgraph, synera_subgraph
+# Ensure the project root is on the path so agent.py can be imported
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from agent import graph, kiki_subgraph, synera_subgraph
 
 OUT_DIR = Path("diagrams")
 OUT_DIR.mkdir(exist_ok=True)
