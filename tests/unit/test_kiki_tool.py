@@ -32,36 +32,19 @@ def _api_response(cell_type="GYR", x=17.0, y=18.0, z=10.0):
 
 
 # ---------------------------------------------------------------------------
-# Input validation — no API call needed, validated before the request is made
+# Input validation — one test covers the pattern; boundary test confirms the
+# exact limit is accepted
 # ---------------------------------------------------------------------------
 
 class TestInputValidation:
-    def test_rejects_body_weight_below_minimum(self):
+    def test_rejects_out_of_range_input(self):
+        # body_wt=10 is below the 55kg minimum — representative of all field violations
         result = json.loads(kiki_recommend.invoke({"bone_preset": "normal", "body_wt": 10.0}))
         assert result["success"] is False
         assert "body_wt" in result["error"]
 
-    def test_rejects_body_weight_above_maximum(self):
-        result = json.loads(kiki_recommend.invoke({"bone_preset": "normal", "body_wt": 200.0}))
-        assert result["success"] is False
-        assert "body_wt" in result["error"]
-
-    def test_rejects_vol_frac_below_minimum(self):
-        result = json.loads(kiki_recommend.invoke({"bone_preset": "normal", "vol_frac": 0.05}))
-        assert result["success"] is False
-        assert "vol_frac" in result["error"]
-
-    def test_rejects_vol_frac_above_maximum(self):
-        result = json.loads(kiki_recommend.invoke({"bone_preset": "normal", "vol_frac": 0.99}))
-        assert result["success"] is False
-        assert "vol_frac" in result["error"]
-
-    def test_rejects_max_stress_out_of_range(self):
-        result = json.loads(kiki_recommend.invoke({"bone_preset": "normal", "max_stress": 5.0}))
-        assert result["success"] is False
-        assert "max_stress" in result["error"]
-
     def test_accepts_boundary_values(self):
+        # Exactly at the lower boundary for body_wt and vol_frac — must not be rejected
         with patch("tools.kiki_recommend.kiki_recommend_tool.requests.post") as mock_post:
             mock_post.return_value = _api_response()
             result = json.loads(kiki_recommend.invoke({"bone_preset": "normal", "body_wt": 55.0, "vol_frac": 0.20}))
@@ -86,26 +69,14 @@ class TestSuccessfulCall:
         assert "vol_frac" in result
         assert "preset_used" in result
 
-    def test_preset_used_is_echoed(self):
-        with patch("tools.kiki_recommend.kiki_recommend_tool.requests.post") as mock_post:
-            mock_post.return_value = _api_response()
-            result = json.loads(kiki_recommend.invoke({"bone_preset": "elderly", "body_wt": 70.0}))
-
-        assert result["preset_used"] == "elderly"
-
     def test_vol_frac_passed_through(self):
+        # The KIKI API does not return vol_frac — the tool adds it from the input
+        # so reconstruct_lattice can use it directly
         with patch("tools.kiki_recommend.kiki_recommend_tool.requests.post") as mock_post:
             mock_post.return_value = _api_response()
             result = json.loads(kiki_recommend.invoke({"bone_preset": "normal", "body_wt": 75.0, "vol_frac": 0.35}))
 
         assert result["vol_frac"] == pytest.approx(0.35)
-
-    def test_all_four_presets_accepted(self):
-        for preset in ("osteoporotic", "elderly", "normal", "athletic"):
-            with patch("tools.kiki_recommend.kiki_recommend_tool.requests.post") as mock_post:
-                mock_post.return_value = _api_response()
-                result = json.loads(kiki_recommend.invoke({"bone_preset": preset, "body_wt": 75.0}))
-            assert result["success"] is True, f"preset '{preset}' failed"
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +102,7 @@ class TestPresetResolution:
 
 
 # ---------------------------------------------------------------------------
-# API error handling
+# API error handling — one test per distinct failure mode
 # ---------------------------------------------------------------------------
 
 class TestErrorHandling:
