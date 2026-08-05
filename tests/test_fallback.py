@@ -21,9 +21,14 @@ def agent_llms():
 
 
 def _rate_limit_error():
+    import httpx
+    response = httpx.Response(
+        429,
+        request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"),
+    )
     return openai.RateLimitError(
         message="Rate limit exceeded (simulated)",
-        response=None,
+        response=response,
         body=None,
     )
 

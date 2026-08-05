@@ -498,13 +498,17 @@ def delete_conversation(thread_id: str) -> None:
         except Exception:
             pass
 
-    # Wrap deletes in an explicit transaction for atomicity
+    # Wrap deletes in an explicit transaction for atomicity.
+    # Checkpoint tables are deleted via nested savepoints so a missing table
+    # (e.g. in a test environment) rolls back only that savepoint, not the
+    # entire transaction.
     with _pg_conn.transaction():
         _pg_conn.execute("DELETE FROM message_images WHERE thread_id = %s", (thread_id,))
         _pg_conn.execute("DELETE FROM conversations  WHERE thread_id = %s", (thread_id,))
         for table in ("checkpoints", "checkpoint_blobs", "checkpoint_writes"):
             try:
-                _pg_conn.execute(f"DELETE FROM {table} WHERE thread_id = %s", (thread_id,))
+                with _pg_conn.transaction():
+                    _pg_conn.execute(f"DELETE FROM {table} WHERE thread_id = %s", (thread_id,))
             except Exception:
                 pass
 
