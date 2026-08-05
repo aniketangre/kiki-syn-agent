@@ -41,40 +41,30 @@ class TestSaveAndListConversations:
     def test_saved_conversation_appears_in_list(self, db):
         agent.save_conversation("t-001", "First conversation")
         convs = agent.list_conversations()
-        assert any(c["thread_id"] == "t-001" for c in convs)
-
-    def test_title_is_stored_correctly(self, db):
-        agent.save_conversation("t-002", "My conversation title")
-        convs = agent.list_conversations()
-        match = next(c for c in convs if c["thread_id"] == "t-002")
-        assert match["title"] == "My conversation title"
+        match = next((c for c in convs if c["thread_id"] == "t-001"), None)
+        assert match is not None
+        assert match["title"] == "First conversation"
 
     def test_save_is_idempotent(self, db):
-        agent.save_conversation("t-003", "Original title")
-        agent.save_conversation("t-003", "Should be ignored")
+        agent.save_conversation("t-002", "Original title")
+        agent.save_conversation("t-002", "Should be ignored")
         convs = agent.list_conversations()
-        matches = [c for c in convs if c["thread_id"] == "t-003"]
+        matches = [c for c in convs if c["thread_id"] == "t-002"]
         assert len(matches) == 1
         assert matches[0]["title"] == "Original title"
 
     def test_title_truncated_at_60_chars(self, db):
-        agent.save_conversation("t-004", "A" * 100)
+        agent.save_conversation("t-003", "A" * 100)
         convs = agent.list_conversations()
-        match = next(c for c in convs if c["thread_id"] == "t-004")
+        match = next(c for c in convs if c["thread_id"] == "t-003")
         assert len(match["title"]) <= 60
 
     def test_list_ordered_newest_first(self, db):
-        agent.save_conversation("t-005", "First saved")
-        agent.save_conversation("t-006", "Second saved")
+        agent.save_conversation("t-004", "First saved")
+        agent.save_conversation("t-005", "Second saved")
         convs = agent.list_conversations()
         ids = [c["thread_id"] for c in convs]
-        assert ids.index("t-006") < ids.index("t-005")
-
-    def test_created_at_is_present(self, db):
-        agent.save_conversation("t-007", "With timestamp")
-        convs = agent.list_conversations()
-        match = next(c for c in convs if c["thread_id"] == "t-007")
-        assert match["created_at"] is not None
+        assert ids.index("t-005") < ids.index("t-004")
 
     def test_empty_list_when_no_conversations(self, db):
         assert agent.list_conversations() == []

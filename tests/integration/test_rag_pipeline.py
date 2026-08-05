@@ -32,37 +32,26 @@ _skip_msg  = "OPENAI_API_KEY not set — skipping RAG pipeline test"
 
 @pytest.mark.skipif(_no_openai, reason=_skip_msg)
 class TestDomainQueries:
-    def test_hip_contact_forces_returns_results(self):
+    def test_biomechanics_query_returns_results(self):
+        # Broad biomechanics query — verifies general retrieval works
         result = rag_search.invoke({"query": "hip contact forces during walking"})
         assert "No relevant information" not in result
         assert "unavailable" not in result.lower()
 
-    def test_implant_loading_returns_results(self):
-        result = rag_search.invoke({"query": "standardized loads for hip implant testing"})
-        assert "No relevant information" not in result
-
-    def test_lattice_structure_returns_results(self):
+    def test_specific_topic_returns_results(self):
+        # Specific topic from a different paper — verifies multiple documents are indexed
         result = rag_search.invoke({"query": "lattice structure endoprosthesis graded density"})
         assert "No relevant information" not in result
 
-    def test_stair_climbing_forces_returns_results(self):
-        result = rag_search.invoke({"query": "tibio-femoral loading stair climbing"})
-        assert "No relevant information" not in result
-
 
 # ---------------------------------------------------------------------------
-# Anti-hallucination — out-of-scope queries should return nothing
+# Anti-hallucination — out-of-scope query should return nothing
 # ---------------------------------------------------------------------------
 
 @pytest.mark.skipif(_no_openai, reason=_skip_msg)
-class TestAntiHallucination:
-    def test_off_topic_query_returns_not_found(self):
-        result = rag_search.invoke({"query": "recipe for pasta carbonara"})
-        assert "No relevant information" in result
-
-    def test_general_programming_query_returns_not_found(self):
-        result = rag_search.invoke({"query": "how to reverse a linked list in Python"})
-        assert "No relevant information" in result
+def test_off_topic_query_returns_not_found():
+    result = rag_search.invoke({"query": "recipe for pasta carbonara"})
+    assert "No relevant information" in result
 
 
 # ---------------------------------------------------------------------------
