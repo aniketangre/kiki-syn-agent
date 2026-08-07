@@ -1,0 +1,5 @@
+# Development-only dependencies — not needed in production
+# Install with: pip install -r requirements-dev.txt
+
+pytest>=8.0
+pytest-mock>=3.12

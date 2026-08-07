@@ -28,6 +28,9 @@ synera_run/test_output.json
 # Claude Code local settings (machine-specific permissions, not project config)
 .claude/
 
+# RAG source documents — copyrighted papers; store locally or in shared drive
+tools/rag_search/documents/*.pdf
+
 # OS
 .DS_Store
 Thumbs.db
